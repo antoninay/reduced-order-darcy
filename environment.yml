@@ -1,0 +1,12 @@
+name: reduced-order-darcy
+channels:
+  - conda-forge
+dependencies:
+  - fenics
+  - numpy
+  - scipy
+  - pandas
+  - matplotlib
+  - joblib
+  - tqdm
+  - jupyterlab

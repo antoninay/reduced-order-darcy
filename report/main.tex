@@ -1,0 +1,949 @@
+\documentclass[12pt,a4paper]{article}
+
+% ---------- Language & typography ----------
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[numbers]{natbib} % <--- Natbib AVANT babel comme demandé !
+\usepackage[french]{babel}
+\usepackage{lmodern}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{xcolor} 
+\usepackage[normalem]{ulem} 
+\usepackage{subcaption}
+
+% ---------- Nouveaux packages pour régler tes erreurs ----------
+\usepackage{float}    % Pour utiliser [H] dans les figures/tables
+\usepackage{booktabs} % Pour utiliser \toprule, \midrule, \bottomrule
+
+
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+
+% ---------- Layout ----------
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+\usepackage{setspace}
+\onehalfspacing
+\usepackage{parskip} 
+
+% ---------- Graphics & links ----------
+\usepackage{graphicx}
+\usepackage[hidelinks]{hyperref}
+\begin{document}
+
+% =======================
+% Page de garde (identique à ton rapport)
+% =======================
+\begin{titlepage}
+  \thispagestyle{empty}
+  \centering
+
+  \noindent
+  \begin{minipage}[t]{0.49\textwidth}
+    \includegraphics[height=2cm]{Logo-ENPC-IP-RVB.png}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[t]{0.49\textwidth}
+    \raggedleft
+    \includegraphics[height=2cm]{cermics.jpeg}
+  \end{minipage}
+
+  {\Large \textsc{École Nationale des Ponts et Chaussées}\par}
+  \vspace{1.0cm}
+
+  {\large \textbf{PROJET DE PREMIÈRE ANNÉE 2026}\par}
+  {\large \textbf{RAPPORT FINAL}\par}
+  \vspace{1.5cm}
+
+  {\LARGE \textbf{Réduction de modèle et Hyper-réduction appliquées à la résolution d'équations différentielles paramétriques}\par}
+  \vspace{1.6cm}
+
+  {\large \textbf{Yasmine EL HOUARI, Antonin AYE, Mathis BORIE, Marek PIOT}\par}
+  \vspace{1.2cm}
+
+  {\large sous la direction de\par}
+  \vspace{0.4cm}
+
+  {\large \textbf{Sofiane EZZEHI}\par}
+  {\large CERMICS\par}
+
+  \vfill
+\end{titlepage}
+
+% =======================
+% Table des matières
+% =======================
+\tableofcontents
+
+% =======================
+% Main content
+% =======================
+
+\vspace*{\fill}
+
+\selectlanguage{english}
+\begin{abstract}
+
+This project studies model order reduction for a parametrized Darcy flow problem in a fractured porous medium. A POD-Galerkin reduced model is first built from high-fidelity finite element snapshots. Then, the Empirical Interpolation Method is used to handle the non-affine dependence introduced by the moving fracture. The numerical results highlight the effectiveness of POD for reducing the dimension of the problem, as well as the contribution of EIM in limiting the online assembly cost.
+\end{abstract}
+
+\noindent\textbf{Keywords:} Model Order Reduction, Hyper-Reduction, Proper Orthogonal Decomposition (POD), Empirical Interpolation Method (EIM), Darcy Flow, Finite Element Method, Parametric Partial Differential Equations.
+
+\vfill % Remplit l'espace vertical jusqu'en haut de la page
+
+\newpage
+
+
+\selectlanguage{french}
+
+
+\section{Introduction}
+
+Les méthodes de réduction de modèle permettent d’approcher efficacement la solution d’un modèle numérique de grande dimension par un modèle de dimension beaucoup plus faible. Elles sont particulièrement utiles pour les équations aux dérivées partielles paramétrées, où l’on doit résoudre plusieurs fois un même problème pour différentes valeurs de paramètres. Dans ce cas, la méthode des éléments finis fournit une solution dite haute fidélité, précise, mais dont le calcul devient rapidement coûteux lorsque la discrétisation conduit à un système de grande taille.
+
+Une approche classique consiste à chercher un espace réduit capable de représenter correctement l’ensemble des solutions possibles du problème. Cet espace peut être construit à partir de solutions haute fidélité calculées pour plusieurs valeurs des paramètres, appelées \textit{snapshots}. Parmi les méthodes les plus utilisées, la \textit{Proper Orthogonal Decomposition} (POD) permet d’extraire les directions principales de variation de ces snapshots. La solution est ensuite cherchée dans l’espace engendré par ces modes, et la projection de Galerkin permet d’obtenir un système réduit de petite taille. Cette stratégie permet donc de réduire fortement le coût de résolution du système linéaire.
+
+Cependant, cette réduction de dimension ne suffit pas toujours. Pour que le modèle réduit soit réellement efficace, il faut également que l’assemblage du système réduit ne dépende plus de la dimension du modèle haute fidélité. Cela est possible lorsque les opérateurs du problème dépendent affinement des paramètres, car les différentes contributions peuvent alors être préassemblées une fois pour toutes en phase \textit{offline}. En revanche, lorsque cette dépendance est non affine, l’assemblage en phase \textit{online} peut encore nécessiter des opérations sur tout le maillage, ce qui limite le gain obtenu par la réduction de modèle. C’est dans ce contexte que les méthodes d’hyper-réduction, comme l’\textit{Empirical Interpolation Method} (EIM), deviennent nécessaires : elles permettent d’approximer les termes non affines par une décomposition affine approchée, compatible avec une séparation \textit{offline-online} efficace.
+
+Dans ce rapport, nous étudions un problème d’écoulement de Darcy dans un milieu poreux fracturé. Le domaine considéré est le carré unité, discrétisé par éléments finis, et l’inconnue principale est le champ de pression du fluide. La conductivité du milieu dépend de plusieurs paramètres décrivant la fracture, sa pente, sa position et sa largeur, ainsi que les conductivités du milieu de fond et de la fracture. La dépendance en certains paramètres est affine, tandis que la dépendance géométrique liée à la fracture est non affine, ce qui motive l’utilisation d’une méthode d’hyper-réduction.
+
+Les objectifs de ce rapport sont les suivants :
+\begin{itemize}
+    \item \textbf{Modéliser et résoudre le problème de Darcy haute fidélité}, en présentant la formulation variationnelle, la discrétisation par éléments finis et le rôle des paramètres de conductivité.
+    \item \textbf{Construire un modèle réduit par POD-Galerkin}, à partir de snapshots du modèle haute fidélité, puis évaluer sa précision selon le nombre de modes conservés.
+    \item \textbf{Analyser la limite du modèle réduit classique}, lorsque la dépendance non affine de la conductivité impose encore un assemblage coûteux sur le maillage complet.
+    \item \textbf{Utiliser l’EIM pour obtenir une hyper-réduction efficace}, puis comparer les approches en termes de temps de calcul et d’erreur.
+\end{itemize}
+
+
+\section{Problématique générale et modélisation}
+
+\subsection{Problème physique : Les fluides et les écoulements de Darcy}
+
+En physique, un fluide sous pression traversant un milieu poreux cherche toujours 
+à minimiser son énergie. Tout comme une bille dévale une pente pour atteindre le 
+point le plus bas, un fluide va naturellement s'écouler en empruntant le chemin de moindre 
+résistance pour dissiper le moins d'énergie possible.
+
+Le fluide se déplace sous l'effet d'un gradient de pression $\nabla u$, où $u$ désigne la pression. 
+Cependant, celui-ci ne s'écoule pas dans le vide : il frotte contre les parois du milieu. La vitesse d'écoulement, notée $\mathbf{v}$, est dictée par la loi empirique de Darcy \cite{darcy_wiki} : 
+$\mathbf{v} = -k \nabla u$, où $k$ est un coefficient empirique qui dépend du fluide et du milieu.
+
+L'énergie volumique dissipée localement par ce frottement visqueux correspond au travail de cette vitesse contre le gradient de pression, valant ainsi $\frac{1}{2} k \nabla u \cdot \nabla u$. 
+En opposition à cette perte d'énergie, on peut considérer le travail fourni au système 
+par une source externe de fluide (comme un puits d'injection ou de pompage), modélisée 
+par un terme $f$.
+
+Le principe de minimisation de l'énergie revient alors à chercher le champ de pression $u$ 
+qui minimise la fonctionnelle $J(u)$ totale sur le domaine étudié $\Omega$ :
+\begin{equation*}
+    J(u) = \int_{\Omega} \frac{1}{2} k \nabla u \cdot \nabla u \, d\Omega - \int_{\Omega} f u \, d\Omega,
+\end{equation*}
+La condition du premier ordre pour minimiser cette énergie impose que sa dérivée s'annule. En appliquant une intégration par parties à cette condition, le problème se sépare mathématiquement en deux composantes. Pour que l'équilibre soit garanti, le fluide doit vérifier une équation différentielle locale à l'intérieur du domaine $\Omega$, et simultanément respecter les contraintes imposées sur les bords $\partial \Omega$ (par exemple, une pression imposée $\bar{u}$, appelée condition de Dirichlet). On obtient ainsi le système complet \cite{darcy_wiki} :
+\begin{equation*}
+  \begin{cases}
+        -\nabla \cdot (k \nabla u) = f & \text{dans } \Omega \\
+        u = \bar{u} & \text{sur } \partial \Omega
+    \end{cases}
+\end{equation*}
+
+\subsection{Paramétrisation du problème}
+
+L'enjeu de ce projet réside dans la dépendance de la solution $u$ vis-à-vis d'un vecteur de paramètres $\mu$ appartenant à un espace admissible $\mu_{\text{ad}} \subset \mathbb{R}^P$. Ces paramètres dictent la structure du milieu.
+
+
+On considère un milieu hétérogène composé d'un matériau de fond (\textit{background}) et d'une \textit{fracture}. La conductivité $k$ est définie par une fonction spatiale dépendant de paramètres géométriques (position $x_0$, orientation $a$, épaisseur $w$) et des propriétés physiques des matériaux :
+\begin{equation*}
+    k(x, y; \mu) = D_{\text{back}} + (D_{\text{frac}} - D_{\text{back}}) \cdot \mathcal{H}(\mathcal{D}(x, y; \mu))
+\end{equation*}
+où $\mathcal{D}$ représente la distance signée à la \textit{fracture} et $\mathcal{H}$ est une fonction caractéristique délimitant la fracture. Cette formulation induit une dépendance \textit{affine} vis-à-vis des valeurs de conductivité physique ($D_{\text{back}}, D_{\text{frac}}$) mais une dépendance fortement \textit{non-linéaire} vis-à-vis des paramètres géométriques.
+
+
+\subsection{Formulation variationnelle}
+
+
+Dans la suite du projet nous considérons le domaine $\Omega=[0,1]^2$, et nous nous intéresserons au problème suivant :
+
+Trouver $u \in H^1(\Omega)$ tel que :
+\begin{equation}
+  \label{probleme1}
+  \begin{cases}
+      -\nabla \cdot (k \nabla u) = 0 & \text{dans } \Omega, \\ 
+      u = \bar{u} & \text{sur } \partial \Omega.
+  \end{cases}
+\end{equation}
+
+où $k \in L^\infty(\Omega)$ est le coefficient de conductivité, supposé uniformément borné et strictement positif (condition d'ellipticité), et $\bar{u} \in H^{1/2}(\partial \Omega)$ est la donnée de Dirichlet sur la frontière, correspondant à la trace sur $\partial \Omega$ d'une fonction de $H^1(\Omega)$.
+
+Pour résoudre ce problème, on utilise une technique de relèvement. Soit $u_L \in H^1(\Omega)$ tel que $u_L|_{\partial \Omega} = \bar{u}$. On peut alors chercher des champs de pression $u_0 \in H_0^1(\Omega)$ tels que $u = u_0 + u_L$ soit solution du problème \eqref{probleme1}. Cela permet de poser la formulation variationnelle suivante :
+
+Trouver $u_0 \in H_0^1(\Omega)$ tel que :
+\begin{equation*}
+    a(u_0, v) = L(v) \quad \forall v \in H_0^1(\Omega)
+\end{equation*}
+
+où les formes bilinéaire et linéaire sont définies par :
+\begin{align}
+    a(u_0, v) &= \int_{\Omega} k(x, y; \mu) \nabla u_0 \cdot \nabla v \, d\Omega, \\
+    L(v) &= -\int_{\Omega} k(x, y; \mu) \nabla u_L \cdot \nabla v \, d\Omega.
+\end{align}
+
+
+
+Sous cette forme, le terme de droite $L(v)$ représente l'influence des conditions aux limites imposées sur le système.
+
+La forme bilinéaire $a(\cdot, \cdot)$ est continue et coercive :
+\begin{align}
+    \text{Continuité:} &\quad |a(u, v)| \leq \|k\|_{\max} \| u\|_                   {H^1} \| v\|_{H^1} \\
+                        &\quad |L(v)| \leq \|k\|_{\max} \|u_L\|_{H^1}\| v\|_{H^1}  \\
+    \text{Coercivité:} &\quad a(u, u) \geq \|k\|_{\min} \| u\|_{H^1}^2
+\end{align}
+avec $\|k\|_{\min} = \min(D_{\text{back}}, D_{\text{frac}}) > 0$ et $\|k\|_{\max} = \max(D_{\text{back}}, D_{\text{frac}})$.
+
+Par le \textbf{théorème de Lax-Milgram}, il existe une unique solution $u' \in H_0^1(\Omega)$ satisfaisant la formulation variationnelle, et donc une solution $u \in H^1(\Omega)$ au problème original.
+
+\subsection{Discrétisation par éléments finis (Modèle Haute Fidélité)}
+
+La solution exacte appartenant à un espace de dimension infinie, on approche le problème par la méthode des éléments finis. On introduit un espace de dimension finie $V_h \subset H^1(\Omega)$, composé de polynômes de Lagrange de degré $d$ associés au maillage. Le problème discret consiste à chercher $u_h \in V_h$ tel que :
+\begin{equation*}
+    a(u_h, v_h; \mu) = L(v_h; \mu) \quad \forall v_h \in V_{h,0}
+\end{equation*}
+
+En choisissant une base $\{\phi_i\}_{i=1}^{N_{\text{dof}}}$ de l'espace $V_h$, le problème se ramène à la résolution d'un système linéaire :
+\begin{equation*}
+  A(\mu) \mathbf{u}_h(\mu) = \mathbf{b}(\mu)
+\end{equation*}
+où $A(\mu)$ est la matrice de rigidité et $\mathbf{b}(\mu)$ le vecteur de charge. En résolvant le système on obtient $\mathbf{u}_h(\mu)$ qui constitue la solution \textbf{Haute Fidélité} (HDM).
+
+\section{Réduction de modèle}
+
+
+La résolution du modèle haute fidélité pour un grand nombre de valeurs du paramètre $\mu$ est coûteuse : à chaque nouvelle configuration, il faut réassembler et résoudre un système linéaire creux de taille $N_{\text{dof}}$. Ce coût, incompressible empêche toutes simulations en temps-réel dans le contexte de problème paramétrique.
+ 
+L'objectif de la \textbf{réduction de modèle} est de construire un substitut de faible dimension, le modèle réduit, qui reproduit fidèlement le comportement du modèle haute fidélité pour tout $\mu \in \mu_{\text{ad}}$, à un coût numérique drastiquement inférieur. Cette construction repose sur une phase \textit{offline} coûteuse, réalisée une seule fois, et une phase \textit{online} ultra-rapide, répétée pour chaque nouvelle valeur de $\mu$.
+
+
+\subsection{L'ensemble d'entraînement}
+
+Pour construire le modèle réduit, on échantillonne $N_s$ solutions du modèle haute fidélité en variant aléatoirement les paramètres dans l'espace admissible $\mu_{\text{ad}}$. Chaque snapshot $\mathbf{u}_h(\mu^{(i)}) \in \mathbb{R}^{N_{\text{dof}}}$ constitue une solution complète du problème haute fidélité pour un jeu de paramètres donné.
+
+L'ensemble d'entraînement ainsi constitué est :
+\begin{equation*}
+    \mathcal{S} = \left\{ \mathbf{u}_h(\mu^{(i)}) \right\}_{i=1}^{N_s} \subset \mathbb{R}^{N_{\text{dof}}}
+\end{equation*}
+ 
+Bien que chaque solution soit différente, elles possèdent de nombreux points communs liés à la géométrie du problème. Ces ressemblances suggèrent qu'il n'est pas nécessaire de conserver les $N_{\text{dof}}$ degrés de liberté pour obtenir des solutions acceptables, ce qui motive l'approche par réduction de modèle.
+
+
+\subsection{Extraction de la base réduite : La méthode POD \label{sec:POD}}
+
+\subsubsection{Principe géométrique et algébrique}
+
+La méthode POD (Proper Orthogonal Decomposition) cherche à extraire les directions principales de variation des solutions, permettant d'approcher au mieux l'ensemble des snapshots dans un sous-espace de faible dimension. On assemble une matrice dont chaque colonne est une solution complète du problème :
+\begin{equation*}
+    U = [\mathbf{u}_h(\mu^{(1)}), \mathbf{u}_h(\mu^{(2)}), \ldots, \mathbf{u}_h(\mu^{(N_s)})] \in \mathbb{R}^{N_{\text{dof}} \times N_s}
+\end{equation*}
+
+On effectue alors une Décomposition en Valeurs Singulières (SVD) de cette matrice de snapshots :
+\begin{equation*}
+    U = \tilde{U} \Sigma V^T
+\end{equation*}
+
+Ici, $\tilde{U} \in \mathbb{R}^{N_{\text{dof}} \times N_s}$ contient les \textbf{modes de la POD}. Le \textbf{théorème d'Eckart-Young} garantit que le sous-espace vectoriel de dimension $r$ permettant d'approcher au mieux l'ensemble des colonnes de la matrice $U$ pour la norme $L^2$, est l'espace engendré par les $r$ premières colonnes de $\tilde{U}$. Ces vecteurs constituent une base orthogonale de l'espace réduit et représentent les directions principales dans lesquelles se projettent les données.
+
+
+$\Sigma$ est une matrice diagonale de \textbf{valeurs singulières} $\sigma_1 \geq \sigma_2 \geq \ldots \geq \sigma_{N_s} \geq 0$, ordonnées par importance décroissante. Les valeurs singulières fournissent une mesure directe de l'énergie contenue dans chaque mode POD. Plus précisément, la fraction d'énergie totale capturée par les premiers $r$ modes est donnée par :
+ 
+\begin{equation*}
+    E(r)=\frac{\sum_{i=1}^{r} \sigma_i^2}{\sum_{i=1}^{N_s} \sigma_i^2}
+\end{equation*}
+
+Cette fraction d'énergie indique dans quelle mesure les premiers modes suffisent à représenter l'ensemble des données originales. En pratique, un choix judicieux du nombre de modes $r$ permet d'obtenir une bonne approximation tout en réduisant la complexité du modèle. On observe généralement que les premières valeurs singulières décroissent très rapidement, ce qui justifie la troncature à un petit nombre de modes.
+
+On construit donc la base réduite en tronquant :
+\begin{equation*}
+    V_r = [\tilde{U}_{:,1}, \tilde{U}_{:,2}, \ldots, \tilde{U}_{:,r}] \in \mathbb{R}^{N_{\text{dof}} \times r}
+\end{equation*}
+
+\subsubsection{Interprétation et propriétés des modes POD}
+
+ 
+Les modes POD $\phi_i = \tilde{U}_{:,i}$ sont hiérarchisés par l'énergie qu'ils contiennent. Le premier mode capture la structure spatiale prédominante, c'est-à-dire la "tendance de fond" commune à tous les écoulements de notre dataset. Les modes suivants (2, 3, \dots) viennent y ajouter des détails et des corrections de plus en plus fins, spécifiquement nécessaires pour capturer les déviations causées par la géométrie variable de la fracture.
+ 
+Cette base orthonormée est ce qui permet de compresser les données de façon optimale : toute solution paramétrique peut s'écrire comme une combinaison linéaire de ces briques élémentaires. On réduit ainsi le problème de la recherche de $N_{\text{dof}}$ valeurs nodales à la recherche de seulement $r \ll N_{\text{dof}}$ coefficients de contribution.
+
+\subsection{Projection de Galerkin et modèle réduit}
+ 
+ 
+Une fois la base $V_r$ construite, on projette le problème variationnel complet sur ce sous-espace de faible dimension. Plutôt que de chercher $\mathbf{u}_h \in \mathbb{R}^{N_{\text{dof}}}$, on cherche maintenant $\mathbf{c}(\mu) \in \mathbb{R}^r$ tel que :
+\begin{equation*}
+    A_r(\mu) \mathbf{c}(\mu) = \mathbf{b}_r(\mu)
+\end{equation*}
+où :
+\begin{align}
+    A_r(\mu) &= V_r^T A(\mu) V_r \in \mathbb{R}^{r \times r} \\
+    \mathbf{b}_r(\mu) &= V_r^T \mathbf{b}(\mu) \in \mathbb{R}^r
+\end{align}
+ 
+La solution réduite est reconstruite simplement par :
+\begin{equation*}
+    \mathbf{u}_r(\mu) = V_r \mathbf{c}(\mu)
+\end{equation*}
+ 
+\textbf{Remarque :} Si l'on définit le \emph{produit scalaire} et la \emph{norme} associés à la matrice symétrique définie positive $A(\mu)$ :
+\begin{align}
+\langle x, y \rangle_{A(\mu)} &= x^T A(\mu)y \\
+\| x \|_{A(\mu)} &= \sqrt{\langle x, x \rangle_{A(\mu)}} = \sqrt{x^T A(\mu) x}
+\end{align}
+Cette norme est appelée \textbf{norme d'énergie} ou \textbf{A-norme}. La projection de Galerkin minimise cette norme, et donc ne minimise pas nécessairement la norme $L^2$ :
+ 
+\begin{align}
+    V_r^T A(\mu) \mathbf{u}_r(\mu) &= A_r(\mu) \mathbf{c}(\mu) = \mathbf{b}_r(\mu) \\
+    &= V_r^T \mathbf{b}(\mu) \\
+    &= V_r^T A(\mu) \mathbf{u}_h(\mu)
+\end{align}
+ 
+On en déduit :
+\begin{align}
+    0_r &= V_r^T A(\mu) (\mathbf{u}_r(\mu) - \mathbf{u}_h(\mu))
+\end{align}
+ 
+Par caractérisation du projeté orthogonal, $\mathbf{u}_r(\mu)$ est la projection orthogonale de $\mathbf{u}_h(\mu)$ sur l'espace engendré par les colonnes de $V_r$ pour le produit scalaire induit par $A(\mu)$ (et non pas pour le produit scalaire $L^2$).
+ 
+L'erreur introduite par la réduction est quantifiée en comparant la solution POD $\mathbf{u}_r(\mu)$ à la solution de référence $\mathbf{u}_h(\mu)$. On évalue cette précision à travers \textbf{l'erreur relative en norme énergétique} (A-norme) : $e_A = \frac{\|u_h - u_r\|_{A(\mu)}}{\|u_h\|_{A(\mu)}}$.
+
+\textbf{Remarque :} la norme d'énergie est équivalente à la norme $L^2$ : 
+\begin{equation*}
+    \lambda_{\min} \|u\|_{L^2}^2 \leq \|u\|_{A(\mu)}^2 \leq \lambda_{\max} \|u\|_{L^2}^2
+\end{equation*}
+où $\lambda_{\min}$ et $\lambda_{\max}$ sont les valeurs propres extrêmes de la matrice $A(\mu)$. Cependant, l'erreur en norme énergétique est plus pertinente pour évaluer la qualité de la projection de Galerkin, car c'est précisément cette norme que la projection de Galerkin minimise. Nous utiliserons donc la norme d'énergie pour étudier les performances d'algorithme reposant sur une projection de Galerkin.
+
+
+\subsection{Limite de la POD seule}
+ 
+\subsubsection{Complexité de la phase online}
+
+La projection de Galerkin réduit le coût de \textit{résolution} du système de $\mathcal{O}(N_{\text{dof}}^{3/2})$ à $\mathcal{O}(r^3)$. Toutefois, en phase \textit{online}, chaque changement du paramètre $\mu$ exige de reconstruire la matrice réduite $A_r(\mu) = V_r^T A(\mu) V_r$. Cela implique deux étapes coûteuses :
+
+\begin{enumerate}
+    \item \textbf{L'assemblage de la matrice $A(\mu)$} : Bien que cette matrice soit creuse grâce au support local des éléments finis, le calcul des intégrales de conductivité sur chaque élément du maillage impose un coût proportionnel à la taille de ce dernier, soit $\mathcal{O}(N_{\text{dof}})$.
+    \item \textbf{La projection de Galerkin} : La multiplication de $A(\mu)$ par la base dense $V_r$ ajoute une complexité de $\mathcal{O}(r^2 N_{\text{dof}})$.
+\end{enumerate}
+
+La phase \textit{online} est donc dominée par ce coût en $\mathcal{O}(r^2 N_{\text{dof}})$. Malgré $r \ll N_{\text{dof}}$, cette dépendance \textit{linéaire} à la taille du maillage constitue le véritable goulot d'étranglement computationnel : le temps d'exécution du modèle réduit reste "esclave" de la finesse du modèle haute fidélité.
+
+\subsubsection{La solution : l'hypothèse de décomposition affine}
+
+Pour briser cette dépendance et rendre la phase \textit{online} véritablement indépendante de $N_{\text{dof}}$, il faut pouvoir former $A_r(\mu)$ sans jamais avoir à instancier $A(\mu)$ en entier. Ceci est mathématiquement possible si la matrice $A(\mu)$ (et par extension la conductivité $k$) admet une \textbf{décomposition affine} par rapport aux paramètres. Il s'agit de trouver des fonctions scalaires $\theta_q : \mu_{\text{ad}} \to \mathbb{R}$ et des matrices $A^{(q)}$ indépendantes de $\mu$ telles que :
+\begin{equation*}
+    A(\mu) = \sum_{q=1}^{Q} \theta_q(\mu)\, A^{(q)}
+\end{equation*}
+
+Si cette propriété est vérifiée, on peut alors pré-calculer les projections réduites $A_r^{(q)} = V_r^T A^{(q)} V_r$ une unique fois lors de la phase \textit{offline}. En phase \textit{online}, la matrice réduite finale s'obtient par une simple combinaison linéaire de ces petites matrices :
+\begin{equation*}
+    A_r(\mu) = \sum_{q=1}^{Q} \theta_q(\mu)\, A_r^{(q)}
+\end{equation*}
+
+Cette opération ne coûte plus que $\mathcal{O}(Q r^2)$ opérations, un temps de calcul strictement décorrélé de $N_{\text{dof}}$. Toute la question qui se pose pour la suite de ce projet est donc de savoir si notre conductivité paramétrée $k(x, y; \mu)$ possède nativement cette structure affine, ou s'il faudra l'approcher de manière empirique.
+ 
+\subsection{Structure affine en les conductivités}
+ 
+\subsubsection{Décomposition affine exacte à géométrie fixée}
+ 
+Lorsque la géométrie de la fracture est fixée, c'est-à-dire lorsque $(a, x_0, w)$ sont donnés, la fonction de conductivité $k(x, y; \mu)$ est une fonction \textbf{linéaire} des deux paramètres scalaires $D_{\text{back}}$ et $D_{\text{frac}}$. En effet, on peut réécrire :
+\begin{align}
+    k(x, y; \mu) &= D_{\text{back}} + (D_{\text{frac}} - D_{\text{back}}) \cdot H(\mathcal{D}(x, y)) \notag \\
+                 &= D_{\text{back}} \underbrace{\bigl(1 - H(\mathcal{D}(x, y))\bigr)}_{k^{(1)}(x,y)}
+                  + D_{\text{frac}} \underbrace{H(\mathcal{D}(x, y))}_{k^{(2)}(x,y)}
+\end{align}
+ 
+où $k^{(1)}(x,y) = 1 - H(\mathcal{D})$ et $k^{(2)}(x,y) = H(\mathcal{D})$ sont deux fonctions spatiales \textbf{indépendantes de $\mu$} (puisque la géométrie est fixée). On obtient ainsi une décomposition affine exacte avec $Q_a = 2$ termes :
+\begin{equation*}
+    k(x, y; \mu) = \theta_1(\mu)\, k^{(1)}(x,y) + \theta_2(\mu)\, k^{(2)}(x,y), \qquad \theta_1 = D_{\text{back}},\ \theta_2 = D_{\text{frac}}
+\end{equation*}
+ 
+Cette décomposition se propage directement à la matrice de rigidité :
+\begin{equation*}
+    A(\mu) = D_{\text{back}}\, A^{(1)} + D_{\text{frac}}\, A^{(2)}
+\end{equation*}
+où les matrices $A^{(1)}, A^{(2)} \in \mathbb{R}^{N_{\text{dof}} \times N_{\text{dof}}}$ sont définies par :
+\begin{equation*}
+    A^{(q)}_{ij} = \int_{\Omega} k^{(q)}(x,y)\, \nabla\phi_i \cdot \nabla\phi_j\, d\Omega, \quad q \in \{1, 2\}
+\end{equation*}
+et ne dépendent que de la géométrie fixée, pas de $(D_{\text{back}}, D_{\text{frac}})$.
+ 
+\subsubsection{Séparation offline-online induite}
+ 
+La décomposition affine permet une séparation stricte du coût de calcul.
+ 
+\textbf{Phase offline :} On assemble une fois pour toutes les deux matrices $A^{(1)}$ et $A^{(2)}$, puis on calcule leurs projections réduites :
+\begin{equation*}
+    A_r^{(1)} = V_r^T A^{(1)} V_r \in \mathbb{R}^{r \times r}, \qquad A_r^{(2)} = V_r^T A^{(2)} V_r \in \mathbb{R}^{r \times r}
+\end{equation*}
+Ce calcul, de coût $\mathcal{O}(N_{\text{dof}} \cdot r)$, n'est effectué qu'une seule fois.
+ 
+\textbf{Phase online :} Pour chaque nouveau couple $(D_{\text{back}}, D_{\text{frac}})$, la matrice réduite s'obtient sans aucun accès au maillage :
+\begin{equation*}
+    A_r(\mu) = D_{\text{back}}\, A_r^{(1)} + D_{\text{frac}}\, A_r^{(2)}
+\end{equation*}
+Cette combinaison linéaire coûte $\mathcal{O}(r^2)$, entièrement indépendant de $N_{\text{dof}}$.
+ 
+\subsubsection{Limite : la géométrie variable brise l'affinité}
+ 
+Dès que les paramètres géométriques $(a, x_0, w)$ varient, la position et l'orientation de la fracture changent. Les fonctions $k^{(1)}$ et $k^{(2)}$ dépendent alors elles-mêmes de $\mu$, et ne peuvent plus être préassemblées en phase offline. La décomposition affine exacte à deux termes n'est plus disponible.
+ 
+Plus généralement, on peut montrer qu'aucune décomposition exacte avec un nombre fini $Q$ de termes ne peut représenter la famille paramétrée $\{H(\mathcal{D}(\cdot\,; a, x_0, w))\}_{(a,x_0,w)}$ : pour chaque configuration géométrique, la Heaviside est supportée sur un demi-espace différent, et l'espace engendré par ces fonctions est de dimension infinie. Il faut donc construire une \textbf{approximation affine}, ce qui fera l'objet de la Section \ref{sec:eim}.
+
+Sans une décomposition affine du terme de conductivité $k(x, y; \mu)$, le modèle réduit reste dépendant de la finesse du maillage haute fidélité, ce qui motive l'utilisation de l'hyper-réduction (EIM).
+
+
+% =================================================================
+% SECTION III — THÉORIE DE L'HYPER-RÉDUCTION (Partie de ton ami)
+% =================================================================
+
+\section{Hyper-réduction : EIM} \label{sec:eim}
+
+\subsection{Motivation}
+
+La projection de Galerkin réduit la dimension du problème de $N_{\text{dof}}$ à $r$, ce qui accélère la résolution du système linéaire. Cependant, elle ne résout pas le goulot d'assemblage : pour chaque évaluation paramétrique, on doit toujours assembler la matrice complète $A(\mu)$ en $\mathcal{O}(N_{\text{dof}})$ opérations.
+
+L'\textbf{Empirical Interpolation Method (EIM)} est une technique d'hyper-réduction destinée à contourner ce problème.
+Comme pour l'espace des solutions, nous pouvons à l'aide d'une POD trouver une base $\{q_m\}_{i=1}^{M}$ permettant d'approcher la condictivité :
+\begin{equation*}
+k(x, y; \mu) \approx \sum_{m=1}^{M} \beta_m(\mu) q_m(x, y)
+\end{equation*}
+où les $\beta_m(\mu)$ sont des coefficients dépendant du paramètre $\mu$ et les $q_m$ sont des fonctions spatiales pré-calculées, alors on peut assembler en phase offline les matrices de rigidité associées aux éléments de cette base :
+\begin{equation*}
+A_r^{(m)} = V_r^T A^{(m)} V_r \quad \text{(une seule fois par mode EIM)}
+\end{equation*}
+et former en phase online :
+\begin{equation*}
+A_r(\mu) = \sum_{m=1}^{M} \beta_m(\mu) A_r^{(m)} \quad \text{(temps négligeable)}
+\end{equation*}
+
+Le principal enjeu de la méthode est donc de déterminer les $\beta_m(\mu)$ sans avoir besoin de faire une projection de $k$ sur les éléments de la base $\{q_m\}_{i=1}^{M}$, opération qui serait en $\mathcal{O}(N_{\text{dof}})$.
+
+\subsection{Méthode} \label{sec:eim_methode}
+
+\subsubsection{Construction de la base EIM}
+
+Pour construire une approximation affine, on commence par collecter des snapshots de la conductivité $k$ sur un ensemble d'entraînement :
+\begin{equation*}
+G = [k(\cdot, \cdot; \mu^{(1)}), k(\cdot, \cdot; \mu^{(2)}), \ldots, k(\cdot, \cdot; \mu^{(N_G)})] \in \mathbb{R}^{N_{\text{dof}} \times N_G}
+\end{equation*}
+
+On applique la Décomposition en Valeurs Singulières (SVD) :
+\begin{equation*}
+G = U_G \Sigma_G V_G^T
+\end{equation*}
+
+Les $M$ premiers vecteurs singuliers :
+\begin{equation*}
+q_m = (U_G)_{:,m} \quad \text{pour } m = 1, \ldots, M
+\end{equation*}
+
+forment la base EIM que l'on utilisera pour approximer les fonctions de conductivité. On note $V_M = \text{span}\{q_1, q_2, \ldots, q_M\}$ l'espace engendré par ces modes.
+
+
+\subsubsection{"Magic points" et sélection greedy}
+
+Comme souligné précédemment, nous avons maintenant une base orthonormale $\{q_m\}_{i=1}^{M}$ pour approximer $k$, mais n'avons aucun moyen de calculer les coefficients $\beta_m(\mu)$ sans faire une projection complète, ce qui est en $\mathcal{O}(N_{\text{dof}})$.
+
+
+La solution proposée par l'EIM pour répondre à ce problème repose sur le fait que pour des fonctions \textit{suffisamment régulières}, des informations locales peuvent permettre de comprendre des comportements globaux.
+
+Ainsi, l'EIM propose un algorithme glouton (greedy algorithm) pour sélectionner $M$ "magic points" $\{t_1, t_2, \ldots, t_M\}$ parmi les $N_{\text{dof}}$ noeuds du maillage possédant les propriétés suivantes :
+\begin{enumerate}
+\item \textbf{Unicité de l'interpolation \cite{barrault2004} :} Pour toute fonction de conductivité $k$, il existe une unique interpolation $\mathcal{I}_M[k]$ de $k$ sur la base $\{q_m\}_{i=1}^{M}$ tel que $\mathcal{I}_M[k](t_m) = k(t_m)$ pour tout "magic point" $t_m$. Les coefficients $\beta_m(\mu)$ peuvent ainsi être déterminés uniquement à partir des valeurs de $k$ aux "magic points".
+\item \textbf{Contrôle de l'erreur globale \cite{barrault2004} :}
+\begin{equation}
+    \label{contrle_erreur_eim}
+\| k - \mathcal{I}_M[k] \|_{L^\infty} \leq (1 + \Lambda_M) \inf_{v \in V_M} \| k - v \|_{L^\infty}
+\end{equation}
+où $\inf_{v \in V_M} \| k - v \|_{L^\infty}$ représente la distance pour la norme $L^\infty$ entre $k$ et l'espace engendré par les modes $q_m$, et $\Lambda_M$ est la \textbf{constante de Lebesgue} associée à l'espace $V_M$ et aux "magic points".
+
+\textbf{Remarque :} La norme $L^\infty$ domine la norme $L^2$ sur un domaine de mesure finie. De plus si l'on travaille avec des fonctions \textit{suffisamment régulières}, $(1 + \Lambda_M) \inf_{v \in V_M} \| k - v \|_{L^\infty}$ décroît de manière exponentielle avec $M$, garantissant très vite une approximation de haute qualité (étude du contrôle de l'erreur section \ref{sec:efficacite_eim}).
+\end{enumerate}
+
+\vspace{0.5cm}
+\textbf{L'algorithme de sélection glouton \cite{barrault2004} :}
+
+\begin{enumerate}
+\item \textbf{Initialisation :} $t_1 = \arg\max_j |q_1(j)|$ (nœud du maillage où $|q_1|$ atteint son maximum).
+
+\item \textbf{Itération pour } $m = 2, \ldots, M$ :
+\begin{enumerate}
+\item Construire la matrice d'interpolation :
+\begin{equation*}
+Z_m = \begin{pmatrix}
+q_1(t_1) & q_2(t_1) & \cdots & q_{m-1}(t_1) \\
+q_1(t_2) & q_2(t_2) & \cdots & q_{m-1}(t_2) \\
+\vdots & \vdots & \ddots & \vdots \\
+q_1(t_{m-1}) & q_2(t_{m-1}) & \cdots & q_{m-1}(t_{m-1})
+\end{pmatrix} \in \mathbb{R}^{(m-1) \times (m-1)}
+\end{equation*}
+\item Résoudre le système $Z_m \mathbf{c} = [q_m(t_1), \ldots, q_m(t_{m-1})]^T$ pour obtenir les coefficients de $\mathbf{c}$.
+\item Calculer l'erreur d'approximation du mode $q_m$ à chaque nœud du maillage :
+\begin{equation*}
+e_j = \left| q_m(j) - \sum_{\ell=1}^{m-1} c_{\ell} q_{\ell}(j) \right|
+\end{equation*}
+\item Sélectionner le point où l'erreur est maximale :
+\begin{equation*}
+t_m = \arg\max_j e_j
+\end{equation*}
+\end{enumerate}
+\end{enumerate}
+On dispose alors d'une matrice d'interpolation finale $Z_M \in \mathbb{R}^{M \times M}$ et d'un ensemble de "magic points" $\{t_1, \ldots, t_M\}$.
+
+\subsubsection{Approximation affine et coefficients}
+
+Les coefficients $\beta_m(\mu)$ sont déterminés par interpolation :
+\begin{equation*}
+\beta(\mu) = Z_M^{-1} \mathbf{k}_{\text{magic}}(\mu)
+\end{equation*}
+
+où $\mathbf{k}_{\text{magic}}(\mu) = [k(t_1; \mu), k(t_2; \mu), \ldots, k(t_M; \mu)]^T$ est le vecteur des valeurs de conductivité évaluées uniquement aux "magic points".
+
+\textbf{Complexité :} Évaluer $\mathbf{k}_{\text{magic}}(\mu)$ coûte $\mathcal{O}(M)$ opérations (au lieu de $\mathcal{O}(N_{\text{dof}})$), ce qui constitue l'amélioration cruciale apportée par l'EIM.
+
+Ainsi, la conductivité peut être approximée par :
+
+\begin{equation*}
+k(x, y; \mu) \approx \sum_{m=1}^{M} \beta_m(\mu) q_m(x, y)
+\end{equation*}
+
+Nous avons construit une approximation affine de la conductivité, permettant de former la matrice réduite $A_r(\mu)$ en temps $\mathcal{O}(M r^2)$. La phase \textit{online} complète a donc une complexité de $\mathcal{O}(M r^2 + r^3)$ (construction de $A_r(\mu)$ + résolution du système réduit), totalement indépendante de $N_{\text{dof}}$.
+
+\subsection{Régularisation} \label{sec:regularisation}
+
+\subsubsection{L'obstacle de l'irrégularité}
+
+Comme nous l'avons souligné dans la Section \ref{sec:eim_methode}, la méthode EIM repose entièrement sur la régularité des fonctions à approximer. Cependant, la régularité de la fonction de Heaviside n'est pas suffisante pour obtenir un contrôle efficace du terme $(1 + \Lambda_M) \inf_{v \in V_M} \| k - v \|_{L^\infty}$ comme montré dans l'Équation \eqref{contrle_erreur_eim}. Il est même possible que la quantité $(1 + \Lambda_M) \inf_{v \in V_M} \| k - v \|_{L^\infty}$ ne décroisse pas avec $M$, rendant l'approche EIM totalement inefficace.
+
+
+\subsubsection{La fonction de Heaviside comme limite de la fonction sigmoïde}
+
+Posons : 
+\begin{equation*}
+    \forall \alpha > 0, \quad \sigma_{\alpha} : x \mapsto \frac{1}{1 + e^{-\alpha x}}
+\end{equation*}
+
+Cette fonction sigmoïde est une approximation lisse (infiniment différentiable) de la fonction de Heaviside $H$. Le paramètre de raideur $\alpha$ contrôle directement l'étalement spatial de la transition entre les deux états. De plus :
+\begin{equation*}
+    \|H - \sigma_{\alpha}\|_{L^2(\mathbb{R})} = \mathcal{O}\left(\frac{1}{\sqrt{\alpha}}\right)
+\end{equation*}
+
+\begin{figure}[ht]
+    \centering
+    \begin{tikzpicture}
+        \begin{axis}[
+            axis lines = middle,
+            xlabel = $x$,
+            ylabel = {y},
+            domain=-2:2,
+            samples=200,
+            ymin=-0.2, ymax=1.2,
+            xmin=-2.2, xmax=2.2,
+            legend pos=north west,
+            grid=both,
+            grid style={dashed, gray!30},
+            width=10cm, height=7cm
+        ]
+            % Définition de alpha
+
+            % Tracé de la Heaviside
+            \addplot [
+                blue, 
+                ultra thick,
+                const plot, % Pour faire des marches d'escalier
+            ] coordinates {(-2,0) (0,0) (0,1) (2,1)};
+
+            % Tracé de la Sigmoïde
+            \addplot [
+                red, 
+                thick,
+                smooth
+            ] {1/(1 + exp(-30*x))};
+
+            
+        \end{axis}
+    \end{tikzpicture}
+    \caption{Comparaison entre la fonction d'Heaviside $\textcolor{blue}{H}$ et une sigmoïde $\textcolor{red}{\sigma_{30}}$.}
+
+    \label{fig:heaviside_vs_sigmoide}
+\end{figure}
+
+Nous pouvons alors à l'aide de ces fonctions sigmoïdes construire pour chaque configuration géométrique de conductivité $k$ une conductivité régularisée :
+\begin{equation*}
+    k_{\alpha}(x, y; \mu_{geo}) = D_{\text{back}} + (D_{\text{frac}} - D_{\text{back}}) \cdot \sigma_{\alpha}(\mathcal{D}(x, y; \mu_{geo})) 
+\end{equation*}
+Ainsi :
+\begin{equation*}
+    \| k - k_{\alpha} \|_{L^2(\Omega)} \xrightarrow[\alpha \to +\infty]{} 0.
+\end{equation*}
+
+\subsubsection{L'efficacité de l'EIM pour les fonctions lisses \label{sec:efficacite_eim}}
+
+On peut borner théoriquement la constante de Lebesgue $\Lambda_M$, inhérente à l'algorithme glouton, par la relation suivante \cite{barrault2004} :
+\begin{equation*}
+    \Lambda_M \leq 2^{M-1} - 1
+\end{equation*}
+
+De plus, pour des fonctions suffisamment régulières (analytiques) telles que les fonctions $k_{\alpha}$, il existe des constantes $C_{\alpha}, \beta_{\alpha} > 0$ (dépendantes de la raideur $\alpha$) telles que \cite{trefethen2013} :
+\begin{equation*}
+    \inf_{v \in V_M} \| k_{\alpha} - v \|_{L^\infty} \leq C_{\alpha} e^{-\beta_{\alpha} M}
+\end{equation*}
+Ainsi, si $\beta_{\alpha} > \ln 2$ (ce qui est vérifié pour des fonctions suffisamment lisses et donc un $\alpha$ pas trop grand), on a :
+\begin{equation*}
+    \| k_{\alpha} - \mathcal{I}_M[k_{\alpha}] \|_{L^\infty} \leq (1 + \Lambda_M) \inf_{v \in V_M} \| k_{\alpha} - v \|_{L^\infty} \leq \frac{C_{\alpha}}{2} e^{-(\beta_{\alpha} - \ln 2) M}
+\end{equation*}
+L'erreur converge ainsi vers zéro exponentiellement vite avec $M$, garantissant une approximation de haute qualité. Toutefois, notre fonction objectif est toujours $k$ et non pas $k_{\alpha}$, nous avons alors l'inégalité triangulaire suivante :
+\begin{equation*}
+    \| k - \mathcal{I}_M[k_{\alpha}] \|_{L^\infty} \leq \| k_{\alpha} - \mathcal{I}_M[k_{\alpha}] \|_{L^\infty} + \| k - k_{\alpha} \|_{L^\infty} 
+\end{equation*}
+Il est alors crucial de choisir une valeur appropriée pour $\alpha$ :
+\begin{itemize}
+    \item \textbf{Si $\alpha$ est trop grand  :} $\beta \leq \ln 2$, et nous perdons le contrôle du terme $\| k_{\alpha} - \mathcal{I}_M[k_{\alpha}] \|_{L^\infty}$.
+    \item \textbf{Si $\alpha$ est trop petit :} la version lissée $k_{\alpha}$ est trop loin de la fonction originale $k$ et c'est cette fois-ci le terme $\| k - k_{\alpha} \|_{L^\infty}$ que nous ne contrôlons plus.
+\end{itemize}
+
+
+% =================================================================
+% SECTION IV — IMPLÉMENTATION ET RÉSULTATS NUMÉRIQUES
+% =================================================================
+
+\section{Implémentation et validation numérique}
+
+Cette section détaille la mise en œuvre pratique du cadre théorique présenté précédemment. L'implémentation a été réalisée en Python, en s'appuyant sur la bibliothèque d'éléments finis \textit{FEniCS} pour la résolution du modèle haute fidélité et l'assemblage des matrices.
+
+Les erreurs ont été évaluées sur un ensemble de test indépendant de $N_{\text{test}} = 50$ configurations paramétriques, tirées aléatoirement dans l'espace des paramètres admissibles.
+
+\subsection{Configuration du cas test paramétrique}
+
+Afin de valider notre approche, nous avons défini un problème de référence simulant un écoulement de Darcy dans un milieu poreux fracturé. 
+
+\subsubsection{Maillage et conditions aux limites}
+Le domaine d'étude $\Omega$ est le carré unité $[0,1]^2$. Il est discrétisé par un maillage régulier de $200 \times 200$ éléments triangulaires. En utilisant des éléments finis de Lagrange de degré 2 ($\mathbb{P}2$), le système discret comporte $N{\text{dof}} = 80\,402$ degrés de liberté.
+
+Les conditions aux limites de Dirichlet sont imposées pour reproduire un scénario d'injection et de drainage :
+\begin{equation*}
+    \bar{u}(x, y) = \begin{cases}
+        4.0 & \text{si } (x < 0.1 \text{ et } y > 0.9) \\
+        1.0 & \text{si } y < 0.1  \\
+        0.0 & \text{ailleurs}
+    \end{cases}
+\end{equation*}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.65\textwidth]{figures/conditions_limites.png}
+    \caption{Visualisation discrète des conditions aux limites imposées sur le bord du domaine.}
+    \label{fig:conditions_limites}
+\end{figure}
+
+\subsubsection{Espace des paramètres}
+Le vecteur de paramètres $\mu = (a, x_0, w, D_{\text{back}}, D_{\text{frac}})$ contrôle la géométrie de la fracture (pente, position, largeur) et les conductivités physiques. L'espace admissible $\mu_{\text{ad}}$ est défini par les plages suivantes :
+\begin{align*}
+    a &\in [20, 60] \quad \text{(pente de la fracture en degrés)} \\
+    x_0 &\in [50, 90] \quad \text{(position verticale)} \\
+    w &\in [3, 7] \quad \text{(demi-largeur de la fracture)} \\
+    D_{\text{back}} &\in [80, 120] \quad \text{(conductivité du milieu de fond)} \\
+    D_{\text{frac}} &\in [0.5, 2.0] \quad \text{(conductivité de la fracture)}
+\end{align*}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.65\textwidth]{figures/conductivite_Kxy.png}
+    \caption{Distribution spatiale de la conductivité $K(x,y)$ pour une configuration donnée de la fracture : $a=40$, $x_0=70$, $w=5$, $D_{\mathrm{back}}=100$ et $D_{\mathrm{frac}}=1$.}
+    \label{fig:conductivite_kxy}
+\end{figure}
+
+\subsection{Modèle Haute Fidélité et ensemble d'entraînement}
+
+La résolution directe du système $A(\mu)\mathbf{u}_h(\mu) = \mathbf{b}(\mu)$ fournit la solution haute fidélité (HDM). La Figure~\ref{fig:hdm_solution} illustre le champ de pression obtenu pour une configuration donnée, où l'on observe clairement l'influence de la fracture sur les isobares.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.65\textwidth]{figures/graphes_projet/distribution_spatiale_solution.png}
+    \caption{\label{fig:hdm_solution}
+    \textbf{Solution de pression du modèle haute fidélité (HDM).} 
+    Champ de pression obtenu par éléments finis sur le maillage de référence.
+    }
+\end{figure}
+Pour construire la base réduite, la phase \textit{offline} débute par l'échantillonnage de $N_s = 200$ paramètres $\mu^{(i)}$ tirés aléatoirement dans $\mu_{\text{ad}}$. Les $200$ solutions HDM correspondantes constituent l'ensemble d'entraînement (snapshots). La Figure~\ref{fig:snapshots_grid} montre la diversité géométrique capturée par cet ensemble.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/snapshot_1.png}
+    \caption{\label{fig:snapshots_grid}
+    \textbf{Trois snapshots représentatifs de l'ensemble d'entraînement.}}
+\end{figure}
+Bien que chauqe snapshot soit unique, on observe des motifs communs, ce qui suggère qu'une base réduite de faible dimension pourrait être suffisante pour capturer l'essentiel des informations nécessaires à la reconstruction de la solution pour de nouvelles configurations paramétriques.
+
+
+
+\subsection{Extraction de la base POD}
+
+L'application de la SVD (Décomposition en Valeurs Singulières) sur la matrice des 200 snapshots permet d'extraire les modes optimaux du système.
+
+\subsubsection{Analyse spectrale}
+La Figure~\ref{fig:pod_spectrum} illustre la décroissance des valeurs singulières. On observe un effondrement extrêmement rapide : les premières valeurs concentrent la quasi-totalité de l'information. La courbe d'énergie cumulée confirme qu'avec seulement $r=20$ modes, on capture plus de $99,9\%$ de l'énergie totale du système.
+
+\begin{figure}[H]
+    \centering
+    \begin{minipage}{0.5\textwidth}
+        \includegraphics[width=\textwidth]{figures/graphes_projet/valeurs_singulières_3.png}
+    \end{minipage}%
+    \hfill
+    \begin{minipage}{0.5\textwidth}
+        \includegraphics[width=\textwidth]{figures/graphes_projet/énergie_cumulée_3.png}
+    \end{minipage}%
+    \caption{\label{fig:pod_spectrum} \textbf{Spectre singulier et énergie cumulée (200 snapshots).}
+    La décroissance abrupte des valeurs singulières (gauche) confirme la forte compressibilité des solutions de ce problème paramétrique.
+    }
+    \end{figure}
+
+\subsubsection{Interprétation physique des modes}
+
+La Figure~\ref{fig:pod_modes} affiche les fonctions de base spatiales $\phi_i$. Le premier mode capte le gradient de pression macroscopique notamment imposé par les conditions aux limites. Les modes de rang supérieur agissent comme des corrections locales, de plus en plus oscillantes, permettant d'ajuster la solution aux variations spécifiques de la géométrie de la fracture.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/03_pod_modes_9.png}
+    \caption{\label{fig:pod_modes}
+    \textbf{Les 9 premiers modes POD spatiaux.}
+    Le mode 1 représente le profil de pression dominant. Les modes 2 à 9 ajoutent des détails structurels autour de la zone de fracture paramétrée.
+    }
+\end{figure}
+
+\subsection{Performances de la méthode POD (Phase Online)}
+
+\subsubsection{Le goulot d'étranglement computationnel}
+
+En projetant le problème sur les $r$ premiers modes, on obtient le modèle réduit. Pour évaluer sa précision, nous avons calculé l'erreur relative commise par rapport à des solutions HDM sur un ensemble de test inédit.
+
+La Figure~\ref{fig:pod_convergence} montre que l'erreur de projection (tant en norme $L^2$ qu'en norme énergétique $A$) décroît exponentiellement avec le nombre de modes. À partir de $r=20$, l'erreur relative passe sous le seuil de $10^{-2}$ ($1\%$), ce qui valide la précision de l'approximation de Galerkin. En revanche, le temps de calcul du modèle réduit reste élevé, principalement à cause de l'assemblage de la matrice réduite $A_r(\mu)$ qui nécessite toujours une évaluation complète de la matrice $A(\mu)$ en $\mathcal{O}(N_{\text{dof}})$ opérations.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{figures/erreur_normeA.png}
+    \caption{\label{fig:pod_convergence}
+    \textbf{Convergence de l'erreur du modèle réduit POD.}
+    L'erreur s'effondre exponentiellement, confirmant la prédiction du théorème d'Eckart-Young pour ce problème elliptique. (ROM : Reduced Order Model, HF : High Fidelity)
+    }
+\end{figure}
+
+
+
+\subsubsection{Le cas de la dépendance affine}
+
+Dans ce test, nous étudions le cas où la géométrie de la fracture est fixée. Les paramètres géométriques sont maintenus constants :
+\[
+a = 40, \qquad x_0 = 70, \qquad w = 5.
+\]
+Seules les conductivités varient :
+\[
+D_{\mathrm{back}} \in [80,120],
+\qquad
+D_{\mathrm{frac}} \in [0.5,2].
+\]
+Nous générons ainsi un ensemble de $N_s = 50$ snapshots. Ce cas correspond à une dépendance affine en les conductivités, ce qui permet de comparer une POD standard à une POD exploitant directement cette séparation.
+
+Afin d'analyser plus finement la compressibilité du problème dans ce cas affine, nous étudions également le spectre des valeurs singulières de la matrice des snapshots. La Figure~\ref{fig:valeurs_singulieres_affine} montre une décroissance extrêmement rapide des valeurs singulières : dès la dixième valeur singulière, l'ordre de grandeur atteint environ $10^{-10}$. Cela confirme que l'espace des solutions possède une structure de faible dimension effective, ce qui explique pourquoi peu de modes POD suffisent à reconstruire correctement les solutions.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.90\textwidth]{figures/valeurs_singulieres.png}
+    \caption{Valeurs singulières de la matrice des snapshots dans le cas affine. La décroissance rapide du spectre montre la forte compressibilité des solutions.}
+    \label{fig:valeurs_singulieres_affine}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.90\textwidth]{figures/comparaisonPOD_standard_séparée.png}
+    \caption{Comparaison entre la POD standard et la POD séparée dans le cas affine. La précision reste équivalente, mais la séparation affine réduit fortement le temps de calcul online.}
+    \label{fig:comparaison_pod_standard_sep}
+\end{figure}
+
+La Figure~\ref{fig:comparaison_pod_standard_sep} compare l'erreur en norme $A$ et le temps de calcul pour les deux approches. On observe d'abord que les erreurs obtenues par la POD standard et par la POD séparée sont pratiquement identiques. La séparation affine ne dégrade donc pas la précision du modèle réduit. On remarque également que l'erreur décroît très rapidement avant d'atteindre un plateau. Cette stagnation ne provient pas de la méthode POD elle-même, mais de la précision machine : une fois les erreurs proches de l'ordre de $10^{-12}$--$10^{-13}$, les limites numériques empêchent d'obtenir une amélioration significative supplémentaire.
+
+En revanche, la différence apparaît nettement sur le temps de calcul. Le temps de la POD standard augmente avec le nombre de modes, car la construction de la matrice réduite reste coûteuse. À l'inverse, le temps de la POD séparée reste très faible et presque constant. Cette différence confirme l'intérêt de la séparation affine : elle permet d'obtenir la même précision tout en réduisant fortement le coût online.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/evolutionsolution_POD.png}
+    \caption{Évolution de la solution approchée en fonction du nombre de modes POD. Quelques modes suffisent à reproduire correctement la solution haute fidélité dans le cas affine.}
+    \label{fig:evolution_solution_pod}
+\end{figure}
+
+La Figure~\ref{fig:evolution_solution_pod} montre l'évolution de la solution approchée lorsque le nombre de modes POD augmente. Dès le premier mode, la structure globale du champ de pression est déjà bien capturée. Avec deux puis trois modes, la solution se rapproche progressivement de la solution haute fidélité. Les différences visuelles deviennent rapidement très faibles, ce qui illustre la capacité de la POD à capturer efficacement la structure globale du champ de pression avec un nombre réduit de modes.
+
+Ces résultats confirment que le cas affine est très favorable à la réduction de modèle. La POD fournit une approximation précise avec peu de modes, et la séparation affine permet de réduire fortement le temps de calcul. Ce cas constitue donc un premier résultat favorable avant de traiter le cas général, où la géométrie varie et où la dépendance n'est plus affine.
+
+\subsection{Hyper-réduction et performances EIM}
+
+\subsubsection{Construction de la base EIM}
+
+On a collecté $N_G = 400$ snapshots de la conductivité $k$ pour différentes configurations géométriques de fracture. L'application de la SVD sur cette matrice de conductivités a permis d'extraire une base EIM.
+
+\begin{figure}[H]
+    \centering
+    \begin{tabular}{ccc}
+        \includegraphics[width=0.5\textwidth]{figures/base_EIM/1.png} &
+        \includegraphics[width=0.5\textwidth]{figures/base_EIM/2.png} \\
+        \includegraphics[width=0.5\textwidth]{figures/base_EIM/3.png} &
+        \includegraphics[width=0.5\textwidth]{figures/base_EIM/4.png}
+    \end{tabular}
+    \caption{\label{fig:base_EIM}
+    \textbf{4 modes de la base EIM.}
+    Visualisation des modes principaux extraits par SVD (puis normalisés pour la norme $L^{\infty}$) des snapshots de conductivité.
+    }
+\end{figure}
+
+\subsubsection{Sélection des "magic points" et approximation de la conductivité}
+L'algorithme glouton a été appliqué pour sélectionner les "magic points". Mais comme précisé dans la Section \ref{sec:regularisation}, le controle de la convergence de l'EIM a été établi pour des fonctions suffisamment régulières, ce qui n'est ici pas le cas à cause de la nature discontinue de la fonction de Heaviside. Comme nous pouvons le voir sur la Figure \ref{fig:erreur_eim_k}, l'erreur d'approximation de l'EIM reste très mauvaise même pour des nombres de modes élevés, confirmant l'inefficacité de l'approche EIM dans ce cas.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth]{figures/erreur2_final.png}
+    \caption{\label{fig:erreur_eim_k}
+    \textbf{Erreur d'approximation de l'EIM pour la conductivité $k$.}}
+\end{figure}
+Cette courbe d'erreur montrant l'inefficacité de l'approche EIM dans ce cas motive l'introduction de la régularisation.
+
+\subsubsection{Régularisation}
+
+Comme expliqué dans la section \ref{sec:regularisation}, nous avons remplacé la fonction de Heaviside par une fonction sigmoïde lisse, contrôlée par un paramètre de raideur $\alpha$.
+
+
+\begin{figure}[H]
+    \centering
+    \begin{tabular}{ccc}
+        \includegraphics[width=0.5\textwidth]{figures/compare_1.png} &
+        \includegraphics[width=0.5\textwidth]{figures/compare_2.png} 
+    \end{tabular}
+    \caption{\label{fig:comparaison_eim_k_kalpha}
+    \textbf{Comparaison entre la conductivité originale $k$ et la conductivité régularisée $k_{\alpha}$ pour $\alpha = 150$.}}
+\end{figure}
+
+La Figure \ref{fig:convergence_alpha} montre la convergence de la conductivité régularisée $k_{\alpha}$ vers la fonction originale $k$ ainsi que la convergence de la solution de pression HDM associée lorsque $\alpha$ augmente.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth]{figures/convergence_alpha.png}
+    \caption{\label{fig:convergence_alpha}
+    \textbf{Convergence de la conductivité régularisée et de la solution de pression associée vers les fonctions associées au problème de la fracture.}}
+\end{figure}
+
+Pour la suite, nous prendrons $\alpha = 150$ qui est une valeur intéressante pour le compromis évoqué à la fin de la section \ref{sec:efficacite_eim} : la conductivité régularisée $k_{150}$ est suffisamment proche de la fonction originale $k$, et est suffisamment lisse pour garantir une bonne convergence de l'EIM. Nous avons donc refait des snapshots de conductivité régularisée et ainsi obtenu une nouvelle base pour l'EIM. Et cette fois-ci, on observe une convergence exponentielle de l'erreur d'approximation de l'EIM pour la conductivité régularisée $k_{\alpha}$ comme étudié dans la section \ref{sec:efficacite_eim} :
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth]{figures/convergence_EIM_conductivite.png}
+    \caption{
+        \label{fig:convergence_EIM_conductivite}
+    \textbf{Performance de l'EIM pour reconstruire la conductivité $k_{\alpha}$.}}
+\end{figure}
+
+Visualisation de la reconstruction de la conductivité $k_{\alpha}$ par l'EIM :
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth]{figures/visualisation_EIM_Cinf.png}
+    \caption{ \label{fig:visualisation_EIM_Cinf}
+    \textbf{Visualisation des performances de l'EIM dans le cas régularisé.}}
+\end{figure}
+
+\subsubsection{Performance finale de l'EIM}
+
+À ce stade nous savons que $k_{150}$ est assez proche de $k$ (Figure \ref{fig:comparaison_eim_k_kalpha}) et nous savons également que $k_{150}$ est bien approché par l'EIM (Figure \ref{fig:convergence_EIM_conductivite} et  \ref{fig:visualisation_EIM_Cinf}).
+
+Nous avons ensuite assemblé une nouvelle matrice de snapshots de solution liée à des conductivités régularisées. Et nous en avons récupéré une base réduite de répartition de pression grâce à une POD (comme expliqué section \ref{sec:POD}). Cette base nous permet d'assembler les matrices réduites liées à la base de l'EIM en phase offline (nous avons choisi $r=100$) et de reconstruire en phase online les solutions comme combinaison linéaire des éléments de cette base réduite.
+
+
+La Figure \ref{fig:perf_final_EIM} étudie les performances obtenues :
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth]{figures/perf_final_EIM.png}
+    \caption{ \label{fig:perf_final_EIM}
+    \textbf{Visualisation des performances de l'EIM dans le cas régularisé.}}
+\end{figure}
+
+On peut voir Figure \ref{fig:perf_final_EIM} que même pour $m=400$ on garde un temps de calcul de deux ordre de grandeur inférieur à celui de la haute résolution. On observe également que malgré le caractère empirique de l'EIM qui se répercute sur les variations de l'erreur, cette dernière converge bien vers celle obtenue pour la réduction classique avec r=100. 
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth]{figures/validation_finale_pression.png}
+    \caption{ \label{fig:validation_finale_pression}
+    \textbf{Comparaison entre la solution de pression haute fidélité et la solution approchée par l'EIM régularisé pour une configuration de test.}}
+\end{figure}
+
+
+
+Les performances de l'EIM avec régularisation et assemblage des matrices réduites en phase offline pour traiter le cas de la dépendance non linéaire sont donc satisfaisantes.
+
+\section{Conclusion}
+
+\subsection{Bilan du projet}
+
+Ce projet a permis d'étudier la réduction de modèle et l'hyper-réduction appliquées à un problème de Darcy paramétrique dans un milieu poreux fracturé. À partir d'un modèle haute fidélité résolu par éléments finis, nous avons construit un modèle réduit par POD-Galerkin. Les résultats montrent que cette méthode est très efficace pour réduire la dimension du problème : avec un nombre limité de modes, le modèle réduit reproduit correctement la solution haute fidélité, avec une erreur faible.
+
+Cependant, la POD seule ne suffit pas toujours à garantir un vrai gain de temps en phase \textit{online}. Lorsque la géométrie de la fracture varie, la conductivité dépend des paramètres de manière non affine. Il faut alors encore assembler certaines quantités sur le maillage complet, ce qui maintient une dépendance affine au degré de liberté et limite les performances du modèle réduit.
+
+L'introduction de l'EIM permet de répondre à cette difficulté en construisant une approximation affine de la conductivité. Cette approche permet de mieux séparer les phases \textit{offline} et \textit{online}, et donc de réduire davantage le coût de calcul. Les résultats montrent néanmoins que l'EIM est peu efficace lorsqu'elle est appliquée directement à une conductivité discontinue. La régularisation par une fonction sigmoïde apparaît alors comme une étape essentielle, car elle rend la conductivité plus lisse et améliore la convergence de l'approximation.
+
+Ainsi, la combinaison POD-Galerkin et EIM régularisée constitue une méthode pertinente pour obtenir un modèle à la fois rapide et précis. Elle ouvre des perspectives intéressantes pour des problèmes nécessitant de nombreuses simulations, comme l'optimisation paramétrique, l'analyse de sensibilité ou la simulation en temps réel.
+
+\subsection{Limitations et perspectives}
+
+\textbf{Limitations du travail actuel:}
+\begin{itemize}
+    \item Domaine 2D ; extension 3D requiert infrastructure parallèle plus robuste
+    \item Conductivité dépendante uniquement de la géométrie ; les dépendances en temps (problèmes dynamiques) exigent des méthodes POD temporelles (POD-Greedy)
+    \item Absence d'estimateurs d'erreur a posteriori rigoureux ; la validation de précision repose sur une référence obtenue par la méthode des éléments finis et donc déjà avec un certain décalage avec la réalité.
+\end{itemize}
+
+\textbf{Perspectives futures:}
+\begin{enumerate}
+    \item \textbf{Problèmes instationnaires :} Appliquer POD-Greedy pour construire des bases adaptées temporellement, adaptées aux équations de Darcy dépendantes du temps
+    \item \textbf{Estimation d'erreur certifiée :} Développer des bornes d'erreur a posteriori basées sur la théorie RBM, permettant un assemblage adaptatif du nombre de modes
+    \item \textbf{Ajout d'un terme source :} Considérer des problèmes de Darcy avec des termes source ou des conditions aux limites plus complexes.
+    \item \textbf{Approches hybrides:} Combiner ROM avec des techniques d'apprentissage machine (neural networks, réseaux convolutifs) pour capturer des dépendances implicites complexes
+\end{enumerate}
+% =======================
+% SECTION IV — RÉSULTATS VISUELS (graphes déplacés depuis la Section II)
+% =======================
+ 
+\newpage
+ 
+% =======================
+% Bibliographie
+% =======================
+
+\begin{thebibliography}{9}
+
+\bibitem{darcy_wiki}
+Wikipédia.
+\href{https://fr.wikipedia.org/wiki/Loi_de_Darcy}{\emph{Loi de Darcy}}.
+
+\bibitem{pod_intro}
+A. Chatterjee.
+\href{https://www.researchgate.net/publication/255613988}{\emph{An introduction to the proper orthogonal decomposition}}.
+Current Science, 2000.
+
+\bibitem{barrault2004}
+M. Barrault, Y. Maday, N. C. Nguyen, et A. T. Patera.
+\href{https://doi.org/10.1016/j.crma.2004.08.006}{An 'empirical interpolation' method: application to efficient reduced-basis discretization of partial differential equations}.
+\emph{Comptes Rendus Mathématique}, 2004.
+
+\bibitem{arxiv_fracture}
+I. Berre et al.
+\href{https://arxiv.org/pdf/2002.07005}{\emph{Verification benchmarks for single-phase flow in three-dimensional fractured porous media}}.
+2020.
+
+\bibitem{trefethen2013}
+L. N. Trefethen.
+\href{https://www.chebfun.org/ATAP/}{\emph{Approximation Theory and Approximation Practice}}.
+SIAM, 2013.
+
+\end{thebibliography}
+
+\end{document}
